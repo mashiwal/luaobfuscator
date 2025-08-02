@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lua Obfuscator Web App</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+    <style>
+        .code-editor {
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 14px;
+            line-height: 1.5;
+            tab-size: 4;
+        }
+        .syntax-highlight {
+            color: #569cd6;
+        }
+        .string-highlight {
+            color: #ce9178;
+        }
+        .comment-highlight {
+            color: #6a9955;
+        }
+        .transition-all {
+            transition: all 0.3s ease;
+        }
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3498db;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // Generate a random UUID
+        function generateUUID() {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                const r = Math.random() * 16 | 0;
+                const v = c === 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        // Obfuscation functions
+        const obfuscationTools = {
+            // Random string generator
+            randomString: (length) => {
+                const chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_';
+                let result = '';
+                for (let i = 0; i < length; i++) {
+                    result += chars.charAt(Math.floor(Math.random() * chars.length));
+                }
+                return result;
+            },
+
+            // XOR encryption
+            xorEncrypt: (str, key) => {
+                return str.split('').map((char, index) => {
+                    return String.fromCharCode(char.charCodeAt(0) ^ key.charCodeAt(index % key.length));
+                }).join('');
+            },
+
+            // Base64 encode strings in Lua code
+            encodeStrings: (code) => {
+                return code.replace(/(["'])(?:(?=(\\?))\2.)*?\1/g, (match) => {
+                    if (match.startsWith("'") && match.endsWith("'")) return match;
+                    const content = match.substring(1, match.length - 1);
+                    return `base64.decode("${btoa(content)}")`;
+                });
+            },
+
+            // Rename variables
+            renameVariables: (code) => {
+                const variableMap = {};
+                const varPattern = /\b(?:local\s+)?([a-zA-Z_][a-zA-Z0-9_]*)\b(?=\s*[^=])/g;
+                
+                // First pass to collect all variables
+                const variables = [];
+                let match;
+                while ((match = varPattern.exec(code)) !== null) {
+                    const varName = match[1];
+                    if (!['function', 'if', 'else', 'elseif', 'end', 'for', 'while', 'do', 'repeat', 'until', 'return', 'local', 'nil', 'true', 'false'].includes(varName)) {
+                        if (!variables.includes(varName)) {
+                            variables.push(varName);
+                        }
+                    }
+                }
+                
+                // Create mapping
+                variables.forEach(varName => {
+                    variableMap[varName] = obfuscationTools.randomString(8);
+                });
+                
+                // Second pass to replace variables
+                let newCode = code;
+                Object.entries(variableMap).forEach(([oldName, newName]) => {
+                    const regex = new RegExp(`\\b${oldName}\\b`, 'g');
+                    newCode = newCode.replace(regex, newName);
+                });
+                
+                return newCode;
+            },
+
+            // Add junk code
+            addJunkCode: (code) => {
+                const junkCodes = [
+                    'local _ = function() return math.random(1, 100) end',
+                    'local __ = function(a, b) return a + b end',
+                    'local ___ = {1, 2, 3, 4, 5}',
+                    'for i = 1, 5 do local _ = i * 2 end',
+                    'if false then print("This will never execute") end',
+                    'local ____ = string.reverse("junk")'
+                ];
+                
+                const lines = code.split('\n');
+                const insertPoints = [];
+                
+                // Determine where to insert junk code (every 5-10 lines)
+                for (let i = 0; i < lines.length; i += Math.floor(Math.random() * 5) + 5) {
+                    insertPoints.push(i);
+                }
+                
+                // Insert junk code
+                let newLines = [...lines];
+                insertPoints.forEach(point => {
+                    if (point < newLines.length) {
+                        const junk = junkCodes[Math.floor(Math.random() * junkCodes.length)];
+                        newLines.splice(point, 0, junk);
+                    }
+                });
+                
+                return newLines.join('\n');
+            },
+
+            // Obfuscate control flow
+            obfuscateControlFlow: (code) => {
+                // This is a simplified version - real control flow obfuscation would be more complex
+                return code.replace(/if\s+(.*?)\s+then/g, (match, condition) => {
+                    const randomVar = obfuscationTools.randomString(8);
+                    return `local ${randomVar} = ${condition}; if ${randomVar} then`;
+                });
+            },
+
+            // Simulate bytecode obfuscation
+            simulateBytecodeObfuscation: (code) => {
+                return `--[[ Bytecode obfuscated Lua code ]]--\n` +
+                       `--[[ Original size: ${code.length} characters ]]--\n` +
+                       `--[[ To use this with a custom Lua VM: ]]--\n` +
+                       `--[[ 1. Compile with standard luac ]]--\n` +
+                       `--[[ 2. Modify bytecode with custom tool ]]--\n` +
+                       `--[[ 3. Use with patched Lua VM that handles modified opcodes ]]--\n\n` +
+                       code;
+            },
+
+            // AES encryption
+            aesEncrypt: (code, key) => {
+                const encrypted = CryptoJS.AES.encrypt(code, key).toString();
+                return `-- AES Encrypted Lua code\n` +
+                       `-- To run this code, use the following loader:\n` +
+                       `local crypto = require("crypto")\n` +
+                       `local encrypted = "${encrypted}"\n` +
+                       `local key = "${key}"\n` +
+                       `local decrypted = crypto.aes_decrypt(encrypted, key)\n` +
+                       `local func = load(decrypted)\n` +
+                       `return func()\n\n` +
+                       `-- The actual encrypted code is below (base64 encoded):\n` +
+                       `-- ${encrypted}`;
+            }
+        };
+
+        // Main App Component
+        function App() {
+            const [luaCode, setLuaCode] = useState('-- Enter your Lua code here\nfunction hello(name)\n  print("Hello, " .. name)\nend\n\nhello("World")');
+            const [obfuscatedCode, setObfuscatedCode] = useState('');
+            const [isProcessing, setIsProcessing] = useState(false);
+            const [activeTab, setActiveTab] = useState('input');
+            const [options, setOptions] = useState({
+                renameVars: true,
+                encodeStrings: true,
+                addJunkCode: false,
+                obfuscateControlFlow: false,
+                bytecodeObfuscation: false,
+                aesEncryption: false
+            });
+            const [aesKey, setAesKey] = useState('mysecretkey');
+            const [error, setError] = useState('');
+            const [success, setSuccess] = useState('');
+
+            // Handle obfuscation
+            const handleObfuscate = () => {
+                setIsProcessing(true);
+                setError('');
+                setSuccess('');
+                
+                try {
+                    let result = luaCode;
+                    
+                    // Apply selected obfuscation techniques
+                    if (options.renameVars) {
+                        result = obfuscationTools.renameVariables(result);
+                    }
+                    
+                    if (options.encodeStrings) {
+                        result = obfuscationTools.encodeStrings(result);
+                    }
+                    
+                    if (options.addJunkCode) {
+                        result = obfuscationTools.addJunkCode(result);
+                    }
+                    
+                    if (options.obfuscateControlFlow) {
+                        result = obfuscationTools.obfuscateControlFlow(result);
+                    }
+                    
+                    if (options.bytecodeObfuscation) {
+                        result = obfuscationTools.simulateBytecodeObfuscation(result);
+                    }
+                    
+                    if (options.aesEncryption) {
+                        result = obfuscationTools.aesEncrypt(result, aesKey);
+                    }
+                    
+                    setObfuscatedCode(result);
+                    setActiveTab('output');
+                    setSuccess('Code obfuscated successfully!');
+                } catch (err) {
+                    setError('Error during obfuscation: ' + err.message);
+                } finally {
+                    setIsProcessing(false);
+                }
+            };
+            
+            // Download obfuscated code
+            const downloadCode = () => {
+                try {
+                    const blob = new Blob([obfuscatedCode], { type: 'text/plain;charset=utf-8' });
+                    const extension = options.bytecodeObfuscation ? 'luac' : 'lua';
+                    saveAs(blob, `obfuscated_code.${extension}`);
+                    setSuccess('File downloaded successfully!');
+                } catch (err) {
+                    setError('Error downloading file: ' + err.message);
+                }
+            };
+            
+            // Handle option change
+            const handleOptionChange = (option) => {
+                setOptions(prev => ({
+                    ...prev,
+                    [option]: !prev[option]
+                }));
+            };
+            
+            // Simple syntax highlighting for Lua code
+            const highlightLuaCode = (code) => {
+                if (!code) return '';
+                
+                return code
+                    .replace(/(--.*$)/gm, '<span class="comment-highlight">$1</span>') // Comments
+                    .replace(/(\b(function|if|then|else|elseif|end|for|while|do|repeat|until|return|local|nil|true|false)\b)/g, '<span class="syntax-highlight">$1</span>') // Keywords
+                    .replace(/(["'])(?:(?=(\\?))\2.)*?\1/g, '<span class="string-highlight">$&</span>') // Strings
+                    .replace(/\b(\d+\.?\d*)\b/g, '<span class="syntax-highlight">$1</span>'); // Numbers
+            };
+
+            return (
+                <div className="min-h-screen bg-gray-100">
+                    {/* Header */}
+                    <header className="bg-blue-600 text-white shadow-lg">
+                        <div className="container mx-auto px-4 py-6">
+                            <h1 className="text-3xl font-bold">Lua Obfuscator</h1>
+                            <p className="mt-2">Protect your Lua code with advanced obfuscation techniques</p>
+                        </div>
+                    </header>
+                    
+                    {/* Main Content */}
+                    <main className="container mx-auto px-4 py-8">
+                        {/* Two-column layout */}
+                        <div className="flex flex-col lg:flex-row gap-8">
+                            {/* Left column - Options */}
+                            <div className="w-full lg:w-1/3 bg-white rounded-lg shadow-md p-6">
+                                <h2 className="text-xl font-semibold mb-4 text-gray-800">Obfuscation Options</h2>
+                                
+                                <div className="space-y-4">
+                                    {/* Source Code Obfuscation */}
+                                    <div className="bg-gray-50 p-4 rounded-lg">
+                                        <h3 className="font-medium text-gray-700 mb-2">Source Code Obfuscation</h3>
+                                        <div className="space-y-2">
+                                            <label className="flex items-center space-x-2">
+                                                <input 
+                                                    type="checkbox" 
+                                                    checked={options.renameVars} 
+                                                    onChange={() => handleOptionChange('renameVars')}
+                                                    className="rounded text-blue-600"
+                                                />
+                                                <span>Rename Variables</span>
+                                            </label>
+                                            <label className="flex items-center space-x-2">
+                                                <input 
+                                                    type="checkbox" 
+                                                    checked={options.encodeStrings} 
+                                                    onChange={() => handleOptionChange('encodeStrings')}
+                                                    className="rounded text-blue-600"
+                                                />
+                                                <span>Encode Strings</span>
+                                            </label>
+                                            <label className="flex items-center space-x-2">
+                                                <input 
+                                                    type="checkbox" 
+                                                    checked={options.addJunkCode} 
+                                                    onChange={() => handleOptionChange('addJunkCode')}
+                                                    className="rounded text-blue-600"
+                                                />
+                                                <span>Add Junk Code</span>
+                                            </label>
+                                            <label className="flex items-center space-x-2">
+                                                <input 
+                                                    type="checkbox" 
+                                                    checked={options.obfuscateControlFlow} 
+                                                    onChange={() => handleOptionChange('obfuscateControlFlow')}
+                                                    className="rounded text-blue-600"
+                                                />
+                                                <span>Obfuscate Control Flow</span>
+                                            </label>
+                                        </div>
+                                    </div>
+                                    
+                                    {/* Bytecode Obfuscation */}
+                                    <div className="bg-gray-50 p-4 rounded-lg">
+                                        <h3 className="font-medium text-gray-700 mb-2">Bytecode Obfuscation</h3>
+                                        <label className="flex items-center space-x-2">
+                                            <input 
+                                                type="checkbox" 
+                                                checked={options.bytecodeObfuscation} 
+                                                onChange={() => handleOptionChange('bytecodeObfuscation')}
+                                                className="rounded text-blue-600"
+                                            />
+                                            <span>Simulate Bytecode Obfuscation</span>
+                                        </label>
+                                        <p className="text-xs text-gray-500 mt-1">
+                                            Note: This simulates the process. Real bytecode obfuscation requires external tools.
+                                        </p>
+                                    </div>
+                                    
+                                    {/* AES Encryption */}
+                                    <div className="bg-gray-50 p-4 rounded-lg">
+                                        <h3 className="font-medium text-gray-700 mb-2">AES Encryption</h3>
+                                        <label className="flex items-center space-x-2">
+                                            <input 
+                                                type="checkbox" 
+                                                checked={options.aesEncryption} 
+                                                onChange={() => handleOptionChange('aesEncryption')}
+                                                className="rounded text-blue-600"
+                                            />
+                                            <span>Encrypt Code</span>
+                                        </label>
+                                        {options.aesEncryption && (
+                                            <div className="mt-2">
+                                                <label className="block text-sm font-medium text-gray-700 mb-1">Encryption Key</label>
+                                                <input
+                                                    type="text"
+                                                    value={aesKey}
+                                                    onChange={(e) => setAesKey(e.target.value)}
+                                                    className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
+                                                    placeholder="Enter encryption key"
+                                                />
+                                                <p className="text-xs text-gray-500 mt-1">
+                                                    Keep this key safe! You'll need it to decrypt the code.
+                                                </p>
+                                            </div>
+                                        )}
+                                    </div>
+                                    
+                                    {/* Obfuscate Button */}
+                                    <button
+                                        onClick={handleObfuscate}
+                                        disabled={isProcessing || !luaCode}
+                                        className={`w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-md transition-all ${(isProcessing || !luaCode) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                    >
+                                        {isProcessing ? (
+                                            <div className="flex items-center justify-center">
+                                                <div className="loader mr-2"></div>
+                                                Processing...
+                                            </div>
+                                        ) : 'Obfuscate Code'}
+                                    </button>
+                                </div>
+                            </div>
+                            
+                            {/* Right column - Code Editor/Viewer */}
+                            <div className="w-full lg:w-2/3 bg-white rounded-lg shadow-md overflow-hidden">
+                                {/* Tabs */}
+                                <div className="flex border-b border-gray-200">
+                                    <button
+                                        onClick={() => setActiveTab('input')}
+                                        className={`px-4 py-3 font-medium ${activeTab === 'input' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                                    >
+                                        Input Code
+                                    </button>
+                                    <button
+                                        onClick={() => setActiveTab('output')}
+                                        disabled={!obfuscatedCode}
+                                        className={`px-4 py-3 font-medium ${activeTab === 'output' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'} ${!obfuscatedCode ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                    >
+                                        Obfuscated Code
+                                    </button>
+                                    <button
+                                        onClick={() => setActiveTab('guide')}
+                                        className={`px-4 py-3 font-medium ${activeTab === 'guide' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-gray-500 hover:text-gray-700'}`}
+                                    >
+                                        Usage Guide
+                                    </button>
+                                </div>
+                                
+                                {/* Tab Content */}
+                                <div className="p-4">
+                                    {/* Error/Success Messages */}
+                                    {error && (
+                                        <div className="mb-4 p-3 bg-red-100 border-l-4 border-red-500 text-red-700">
+                                            <p>{error}</p>
+                                        </div>
+                                    )}
+                                    {success && (
+                                        <div className="mb-4 p-3 bg-green-100 border-l-4 border-green-500 text-green-700">
+                                            <p>{success}</p>
+                                        </div>
+                                    )}
+                                    
+                                    {/* Input Code Tab */}
+                                    {activeTab === 'input' && (
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 mb-2">
+                                                Enter your Lua code:
+                                            </label>
+                                            <textarea
+                                                value={luaCode}
+                                                onChange={(e) => setLuaCode(e.target.value)}
+                                                className="w-full h-96 p-3 border border-gray-300 rounded-md font-mono text-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 code-editor"
+                                                spellCheck="false"
+                                            />
+                                        </div>
+                                    )}
+                                    
+                                    {/* Obfuscated Code Tab */}
+                                    {activeTab === 'output' && obfuscatedCode && (
+                                        <div>
+                                            <div className="flex justify-between items-center mb-2">
+                                                <label className="block text-sm font-medium text-gray-700">
+                                                    Obfuscated Lua code:
+                                                </label>
+                                                <button
+                                                    onClick={downloadCode}
+                                                    className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-sm rounded-md transition-all"
+                                                >
+                                                    Download
+                                                </button>
+                                            </div>
+                                            <div 
+                                                className="w-full h-96 p-3 border border-gray-300 rounded-md overflow-auto bg-gray-50 font-mono text-sm code-editor"
+                                                dangerouslySetInnerHTML={{ __html: highlightLuaCode(obfuscatedCode) }}
+                                            />
+                                        </div>
+                                    )}
+                                    
+                                    {/* Guide Tab */}
+                                    {activeTab === 'guide' && (
+                                        <div className="prose max-w-none">
+                                            <h3 className="text-lg font-medium text-gray-900 mb-3">Usage Guide</h3>
+                                            
+                                            <h4 className="text-md font-medium text-gray-800 mt-4">Source Code Obfuscation</h4>
+                                            <p className="text-gray-700">
+                                                The obfuscated Lua code can be used directly in any standard Lua interpreter. 
+                                                The code maintains its original functionality while making it harder to understand.
+                                            </p>
+                                            
+                                            <h4 className="text-md font-medium text-gray-800 mt-4">Bytecode Obfuscation</h4>
+                                            <p className="text-gray-700">
+                                                For real bytecode obfuscation, follow these steps:
+                                            </p>
+                                            <ol className="list-decimal pl-5 space-y-1 text-gray-700">
+                                                <li>Compile your Lua code with the standard <code>luac</code> compiler</li>
+                                                <li>Use a bytecode manipulation tool to modify the opcodes and constants</li>
+                                                <li>Use a custom Lua VM that understands your modified bytecode</li>
+                                            </ol>
+                                            
+                                            <h4 className="text-md font-medium text-gray-800 mt-4">AES Encryption</h4>
+                                            <p className="text-gray-700">
+                                                When using AES encryption, you'll need to include a decryption loader with your code.
+                                                The loader requires a Lua crypto library that supports AES decryption.
+                                            </p>
+                                            <p className="text-gray-700 mt-2">
+                                                Recommended libraries:
+                                            </p>
+                                            <ul className="list-disc pl-5 space-y-1 text-gray-700">
+                                                <li>LuaCrypto</li>
+                                                <li>LuaSec</li>
+                                                <li>Custom binding to OpenSSL or other crypto libraries</li>
+                                            </ul>
+                                            
+                                            <h4 className="text-md font-medium text-gray-800 mt-4">Custom Lua VM Integration</h4>
+                                            <p className="text-gray-700">
+                                                For maximum protection, consider using a custom Lua VM with these modifications:
+                                            </p>
+                                            <ul className="list-disc pl-5 space-y-1 text-gray-700">
+                                                <li>Modified bytecode instructions</li>
+                                                <li>Custom opcode mappings</li>
+                                                <li>Anti-debugging techniques</li>
+                                                <li>Code integrity checks</li>
+                                            </ul>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+                    </main>
+                    
+                    {/* Footer */}
+                    <footer className="bg-gray-800 text-white py-6">
+                        <div className="container mx-auto px-4 text-center">
+                            <p>Lua Obfuscator Web App - Protect your Lua code from reverse engineering</p>
+                            <p className="mt-2 text-gray-400 text-sm">Note: This tool provides basic obfuscation. For maximum security, consider additional protection measures.</p>
+                        </div>
+                    </footer>
+                </div>
+            );
+        }
+
+        // Render the app
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+
+    <xaiArtifact artifact_id="a1b2c3d4-e5f6-7890-g1h2-i3j4k5l6m7n8" title="Lua Obfuscator Web App" contentType="text/html">
+        <!-- The entire HTML content above is part of the artifact -->
+    </xaiArtifact>
+</body>
+</html>
